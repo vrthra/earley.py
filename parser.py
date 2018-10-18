@@ -1,115 +1,151 @@
+import re
+RE_NONTERMINAL = re.compile(r'(<[a-zA-Z_]*>)')
+def split_tokens(rule): return [i for i in re.split(RE_NONTERMINAL, rule) if i != ''] or ['']
+
+def show_col(col, i):
+    print("chart[%d]"%i)
+    for state in col.states:
+        print(state, "\t", [s.c for s in state.children])
+    print()
+
+counter = 0
 class State(object):
-    def __init__(self, name, expr, dot, origin):
-        self.name, self.expr, self.dot, self.origin = name, expr, dot, origin
-        self.end_column = None
+    def __init__(self, name, expr, dot, start_column):
+        global counter
+        self.name, self.expr, self.dot, self.start_column, self.children = name, expr, dot, start_column, []
+        self.c = counter
+        counter += 1
     def finished(self): return self.dot >= len(self.expr)
-    def shift(self): return State(self.name, self.expr, self.dot+1, self.origin)
+    def shift(self, bp=None):
+        s = State(self.name, self.expr, self.dot+1, self.start_column)
+        s.children = self.children[:]
+        return s
     def symbol(self): return self.expr[self.dot]
 
-    def _t(self): return (self.name, self.expr, self.dot, self.origin)
+    def _t(self): return (self.name, self.expr, self.dot, self.start_column)
     def __hash__(self): return hash((self.name, self.expr))
     def __eq__(self, other): return  self._t() == other._t()
+    def __str__(self): return ("(S%d)   " % self.c) + self.name +':= '+ ' '.join([str(p) for p in [*self.expr[:self.dot],'|', *self.expr[self.dot:]]])
     def __repr__(self): return str(self)
-    def __str__(self): return self.name +':= '+ ' '.join([str(p) for p in self.expr])
 
 class Column(object):
-    def __init__(self, token):
-        self.token = token
-        self.states = []
-        self._unique = set()
-    def add(self, state):
-        if state in self._unique: return
-        self._unique.add(state)
-        state.end_column = self
+    def __init__(self, i, token):
+        self.token, self.states, self._unique = token, [], {}
+        self.i = i
+    def add(self, state, bp=None):
+        if state in self._unique:
+            if bp: state.children.append(bp)
+            return
+        self._unique[state] = state
+        if bp: state.children.append(bp)
         self.states.append(state)
     def __repr__(self):
-        return str((self.token, self.states))
+        return "%s chart[%d] %s" % (self.token, self.i, str(self.states))
 
-def predict(col, sym):
-    for prod in grammar[sym]:
-        col.add(State(sym, tuple(prod), 0, col))
+def predict(col, sym, grammar):
+    for alt in grammar[sym]:
+        col.add(State(sym, tuple(alt), 0, col))
 
 def scan(col, state, token):
     if token == col.token:
         col.add(state.shift())
 
-def complete(col, state):
-    for st in state.origin.states:
-        if not st.finished() and state.name == st.symbol():
-            col.add(st.shift())
+def complete(col, state, grammar):
+    for st in state.start_column.states:
+        if st.finished(): continue
+        sym = st.symbol()
+        if state.name != sym: continue
+        assert sym in grammar
+        col.add(st.shift(), state)
 
+# http://courses.washington.edu/ling571/ling571_fall_2010/slides/parsing_earley.pdf
+# https://github.com/tomerfiliba/tau/blob/master/earley3.py
+# http://loup-vaillant.fr/tutorials/earley-parsing/recogniser
+def parse(words, grammar, start):
+    alt = tuple(*grammar[start])
+    chart = [Column(i,tok) for i,tok in enumerate([None, *words])]
+    chart[0].add(State(start, alt, 0, chart[0]))
 
-def parse(text, grammar, start):
-    table = [Column(tok) for tok in ([None] + list(text))]
-    alts = grammar[start]
-    table[0].add(State(start, tuple(alts[0]), 0, table[0]))
-
-    for i, col in enumerate(table):
+    for i, col in enumerate(chart):
         for state in col.states:
             if state.finished():
-                complete(col, state)
+                complete(col, state, grammar)
             else:
-                term = state.symbol()
-                if term in grammar:
-                    predict(col, term)
+                sym = state.symbol()
+                if sym in grammar:
+                    predict(col, sym, grammar)
                 else:
-                    if i + 1 < len(table):
-                        scan(table[i+1], state, term)
-    for st in table[-1].states:
-        if st.name == start and st.finished(): return st
-    raise ValueError("parsing failed")
+                    if i + 1 >= len(chart): continue
+                    scan(chart[i+1], state, sym)
+    return chart
 
-
-#----------------------
-
-class Node(object):
-    def __init__(self, value, children):
-        self.value = value
-        self.children = children
-    def print_(self, level = 0):
-        print("  " * level + str(self.value))
-        for child in self.children:
-            child.print_(level + 1)
-
-
-def build_trees(state, g):
-    nts = [i for i in state.expr if i in g]
-    return build_trees_helper([], state, len(nts) - 1, state.end_column, g)
-
-def build_trees_helper(children, state, rule_index, end_column, g):
-    if rule_index < 0:
-        return [Node(state, children)]
-    elif rule_index == 0:
-        origin = state.origin
-    else:
-        origin = None
-    
-    rule = state.expr[rule_index]
-    outputs = []
-    for st in end_column.states:
-        if st is state:
-            break
-        if st is state or not st.finished() or st.name != rule:
-            continue
-        if origin is not None and st.origin != origin:
-            continue
-        for sub_tree in build_trees(st, g):
-            for node in build_trees_helper([sub_tree] + children, state, rule_index - 1, st.origin, g):
-                outputs.append(node)
-    return outputs
-
-START = '^'
+START = '<start>'
 grammar = {
-        START:[['<expr>']],
-        '<sym>': [['a'], ['b'], ['c'], ['d']],
-        '<op>': [['+']],
-        '<expr>': [
-            ['<sym>'],
-            ['<expr>', '<op>', '<expr>']]
+        START:['<expr>'],
+        '<sym>': ['a', 'b', 'c', 'd'],
+        '<op>': ['+', '-'],
+        '<expr>': ['<sym>', '<expr><op><expr>']
         }
+#grammar = {'<start>': [['<expr>']],
+# '<expr>': [['<term>', '<expr_>']],
+# '<expr_>': [['+', '<expr>'], ['-', '<expr>'], ['']],
+# '<term>': [['<factor>', '<term_>']],
+# '<term_>': [['*', '<term>'], ['/', '<term>'], ['']],
+# '<factor>': [['+', '<factor>'],
+#  ['-', '<factor>'],
+#  ['(', '<expr>', ')'],
+#  ['<int>']],
+# '<int>': [['<integer>', '<integer_>']],
+# '<integer_>': [[''], ['.', '<integer>']],
+# '<integer>': [['<digit>', '<I>']],
+# '<I>': [['<integer>'], ['']],
+# '<digit>': [['0'],
+#  ['1'],
+#  ['2'],
+#  ['3'],
+#  ['4'],
+#  ['5'],
+#  ['6'],
+#  ['7'],
+#  ['8'],
+#  ['9']]}
+#
+grammar = {
+        START:['<expr>'],
+        '<sym>': ['a', 'b', 'c', 'd'],
+        '<expr>': ['<sym>', '<expr>+<expr>', '<expr>-<expr>']
+        }
+
+grammar = {
+        START: ['<S>'],
+        '<S>': ['<NP><VP>'],
+        '<PP>': ['<P><NP>'],
+        '<VP>': ['<V><NP>', '<VP><PP>'],
+        '<P>': ['with'],
+        '<V>': ['saw'],
+        '<NP>': ['<NP><PP>', '<N>'],
+        '<N>': ['astronomers', 'ears', 'stars', 'telescopes']
+        }
+
+
+#grammar = {'<start>': ['<expr>'],
+# '<expr>': ['<term>+<expr>', '<term>-<expr>', '<term>'],
+# '<term>': ['<factor>*<term>', '<factor>/<term>', '<factor>'],
+# '<factor>': ['+<factor>',
+#  '-<factor>',
+#  '(<expr>)',
+#  '<integer>',
+#  '<integer>.<integer>'],
+# '<integer>': ['<digit><integer>', '<digit>'],
+# '<digit>': ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']}
+new_grammar = {k: [split_tokens(e) for e in grammar[k]] for k in grammar}
+
 import sys
 text = sys.argv[1]
-parsed = parse(text, grammar, START)
-forest = build_trees(parsed, grammar)
-for tree in forest:
-    tree.print_()
+table = parse(text.split(), new_grammar, START)
+state, *states = [st for st in table[-1].states if st.name == START and st.finished()]
+assert not states
+def node_translator(state):
+    return (state.name, [node_translator(i) for i in state.children] if state.children else [(state.expr[0], [])])
+
+print(node_translator(state))
