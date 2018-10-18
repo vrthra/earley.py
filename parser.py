@@ -44,7 +44,10 @@ class Column(object):
 
 def predict(col, sym, grammar):
     for alt in grammar[sym]:
-        col.add(State(sym, tuple(alt), 0, col))
+        if alt == ['']:
+            col.add(State(sym, tuple([]), 0, col))
+        else:
+            col.add(State(sym, tuple(alt), 0, col))
 
 def scan(col, state, token):
     if token == col.token:
@@ -80,52 +83,52 @@ def parse(words, grammar, start):
     return chart
 
 START = '<start>'
-grammar = {
-        START:['<expr>'],
-        '<sym>': ['a', 'b', 'c', 'd'],
-        '<op>': ['+', '-'],
-        '<expr>': ['<sym>', '<expr><op><expr>']
-        }
-#grammar = {'<start>': [['<expr>']],
-# '<expr>': [['<term>', '<expr_>']],
-# '<expr_>': [['+', '<expr>'], ['-', '<expr>'], ['']],
-# '<term>': [['<factor>', '<term_>']],
-# '<term_>': [['*', '<term>'], ['/', '<term>'], ['']],
-# '<factor>': [['+', '<factor>'],
-#  ['-', '<factor>'],
-#  ['(', '<expr>', ')'],
-#  ['<int>']],
-# '<int>': [['<integer>', '<integer_>']],
-# '<integer_>': [[''], ['.', '<integer>']],
-# '<integer>': [['<digit>', '<I>']],
-# '<I>': [['<integer>'], ['']],
-# '<digit>': [['0'],
-#  ['1'],
-#  ['2'],
-#  ['3'],
-#  ['4'],
-#  ['5'],
-#  ['6'],
-#  ['7'],
-#  ['8'],
-#  ['9']]}
+#grammar = {
+#        START:['<expr>'],
+#        '<sym>': ['a', 'b', 'c', 'd'],
+#        '<op>': ['+', '-'],
+#        '<expr>': ['<sym>', '<expr><op><expr>']
+#        }
+grammar = {'<start>': [['<expr>']],
+ '<expr>': [['<term>', '<expr_>']],
+ '<expr_>': [['+', '<expr>'], ['-', '<expr>'], ['']],
+ '<term>': [['<factor>', '<term_>']],
+ '<term_>': [['*', '<term>'], ['/', '<term>'], ['']],
+ '<factor>': [['+', '<factor>'],
+  ['-', '<factor>'],
+  ['(', '<expr>', ')'],
+  ['<int>']],
+ '<int>': [['<integer>', '<integer_>']],
+ '<integer_>': [[''], ['.', '<integer>']],
+ '<integer>': [['<digit>', '<I>']],
+ '<I>': [['<integer>'], ['']],
+ '<digit>': [['0'],
+  ['1'],
+  ['2'],
+  ['3'],
+  ['4'],
+  ['5'],
+  ['6'],
+  ['7'],
+  ['8'],
+  ['9']]}
 #
-grammar = {
-        START:['<expr>'],
-        '<sym>': ['a', 'b', 'c', 'd'],
-        '<expr>': ['<sym>', '<expr>+<expr>', '<expr>-<expr>']
-        }
-
-grammar = {
-        START: ['<S>'],
-        '<S>': ['<NP><VP>'],
-        '<PP>': ['<P><NP>'],
-        '<VP>': ['<V><NP>', '<VP><PP>'],
-        '<P>': ['with'],
-        '<V>': ['saw'],
-        '<NP>': ['<NP><PP>', '<N>'],
-        '<N>': ['astronomers', 'ears', 'stars', 'telescopes']
-        }
+#grammar = {
+#        START:['<expr>'],
+#        '<sym>': ['a', 'b', 'c', 'd'],
+#        '<expr>': ['<sym>', '<expr>+<expr>', '<expr>-<expr>']
+#        }
+#
+#grammar = {
+#        START: ['<S>'],
+#        '<S>': ['<NP><VP>'],
+#        '<PP>': ['<P><NP>'],
+#        '<VP>': ['<V><NP>', '<VP><PP>'],
+#        '<P>': ['with'],
+#        '<V>': ['saw'],
+#        '<NP>': ['<NP><PP>', '<N>'],
+#        '<N>': ['astronomers', 'ears', 'stars', 'telescopes']
+#        }
 
 
 #grammar = {'<start>': ['<expr>'],
@@ -138,14 +141,26 @@ grammar = {
 #  '<integer>.<integer>'],
 # '<integer>': ['<digit><integer>', '<digit>'],
 # '<digit>': ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']}
-new_grammar = {k: [split_tokens(e) for e in grammar[k]] for k in grammar}
+new_grammar = grammar #{k: [split_tokens(e) for e in grammar[k]] for k in grammar}
 
 import sys
 text = sys.argv[1]
-table = parse(text.split(), new_grammar, START)
+table = parse(list(text), new_grammar, START)
 state, *states = [st for st in table[-1].states if st.name == START and st.finished()]
 assert not states
-def node_translator(state):
-    return (state.name, [node_translator(i) for i in state.children] if state.children else [(state.expr[0], [])])
 
-print(node_translator(state))
+def process_expr(expr, children, grammar):
+    lst = []
+    nt_counter = 0
+    for i in expr:
+        if i not in grammar:
+            lst.append((i,[]))
+        else:
+            lst.append(node_translator(children[nt_counter], grammar))
+            nt_counter += 1
+    return lst
+
+def node_translator(state, grammar):
+    return (state.name, process_expr(state.expr, state.children, grammar))
+
+print(node_translator(state, grammar))
